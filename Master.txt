@@ -1,1 +1,140 @@
-# Fluent_UDF_Reactions
+#include "udf.h"
+#include "math.h"
+
+DEFINE_VR_RATE(my_rate,c,t,r,mw,yi,rate,rr_t)
+{
+	real A1=4.225e15;
+	real A2=1.020e15;
+	real A3=1.955e6;
+	
+	real E1=2.4e5;
+	real E2=2.439e5;
+	real E3=6.713e4;
+
+	real HCH4 = 4604.28; //3.828e4;
+	real HH2O = 10666.35; //8.868e4;
+	real HCO = 8497.71; // 7.065e4;
+	real HH2 = 9971.13; //8.290e4;
+
+	real UGC=8.314;
+
+	real ACH4=6.65e-4;
+	real AH2O=1.77e5;
+	real ACO=8.23e-5;
+	real AH2=6.12e-9;
+	
+	real T=C_T(c,t);
+	real P=C_P(c,t); 
+	real KCH4, KH2O, KCO, KH2;
+	real k1, k2, k3;
+	real PCH4, PH2O, PCO, PCO2, PH2;
+	real DEN;
+	real Keq_1, Keq_2, Keq_3;
+	real mtotal;
+	real R1, R2, R3;
+	real small=1e-10;
+
+	/* Mass Fraction */
+	real yCH4=yi[0];
+	real yH2O=yi[1];
+	real yCO=yi[2];
+	real yCO2=yi[3];
+	real yH2=yi[4];
+	
+	/* Molecular Weights */
+	real mCH4= 16.04303;
+	real mH2O= 18.01534;
+	real mCO= 28.01055;
+	real mCO2= 44.00995;
+	real mH2= 2.01594;
+
+	/* Adsorption Coefficient */
+	KCH4=ACH4*exp(HCH4/(UGC*T));
+	KH2O=AH2O*exp(-HH2O/(UGC*T));
+	KCO=ACO*exp(HCO/(UGC*T));
+	KH2=AH2*exp(HH2/(UGC*T));
+
+	/* Rate Coefficient */
+	k1=A1*exp(-E1/(UGC*T));
+	k2=A2*exp(-E2/(UGC*T));
+	k3=A3*exp(-E3/(UGC*T));
+
+	/* Parcial Pressure */
+
+	PCH4=1.;
+	PH2O=1.;
+	PCO=1.;
+	PCO2=1.;
+	PH2=1.;
+
+	PCH4*=1/mCH4;	/* PCH4*1/mCH4 = PCH4, moles per unit mass [kmol/kg] */
+	PH2O*=1/mH2O;
+	PCO*=1/mCO;
+	PCO2*=1/mCO2;
+	PH2*=1/mH2;
+
+
+	mtotal=yCH4+yH2O+yCO+yCO2+yH2; /* sum of mass fractions */
+
+	PCH4*=1/mtotal; if (PCH4<small) PCH4=small;
+	PH2O*=1/mtotal; if (PH2O<small) PH2O=small;
+	PCO*=1/mtotal;  if (PCO<small) PCO=small;
+	PCO2*=1/mtotal; if (PCO2<small) PCO2=small;
+	PH2*=1/mtotal; if (PH2<small) PH2=small;
+	/* calculated partial pressure variable turn into 
+	ratio over sum of partial pressure, unit is [-]*/
+
+	PCH4*=P;
+	PH2O*=P;
+	PCO*=P;
+	PCO2*=P;
+	PH2*=P;
+
+
+	/* DEN */
+	DEN=(1+KCO*PCO+KH2*PH2+KCH4*PCH4+KH2O*PH2O/PH2);
+
+	/* Equilibrium Constant */
+	Keq_1=pow(T,7.195)*exp((-2.055e1-2.292e4/T)-(2.949e-3)*T);
+	Keq_2=pow(T,1.012)*exp((-1.211e1+5.319e3/T)+(1.144e-4)*T);
+	Keq_3=Keq_1*Keq_2;
+
+	/* Reaction Rate */
+	
+		if (!strcmp(r->name,"reaction-1"))	    /* Reaction-1 {CH4 + H2O -> CO + 3H2} */	
+	{	R1=(k1/pow((PH2),2.5))*((PCH4)*(PH2O)-  pow((PH2),3.0)*(PCO)/Keq_1)  /pow((DEN),2.0);
+		*rate=R1*2142./3600.;}
+
+		else if (!strcmp(r->name, "reaction-2"))	    /* Reaction-1 {CH4 + H2O <- CO + 3H2} */
+		{
+			R1 = (k1 / pow((PH2), 2.5))*((PCH4)*(PH2O)-pow((PH2), 3.0)*(PCO) / Keq_1) / pow((DEN), 2.0);
+			*rate = R1 * 2142. / 3600.;
+		}
+
+		else if (!strcmp(r->name,"reaction-3"))	/* Reaction-2 {CH4 + 2H2O -> CO2 + 4H2} */
+	{	R2=(k2/pow((PH2),3.5)*((PCH4)*pow((PH2O),2.0)-pow((PH2),4.0)*(PCO2)/Keq_3))/pow((DEN),2.0);
+		*rate=R2*2142./3600.;}
+
+		else if (!strcmp(r->name, "reaction-4"))	/* Reaction-2 {CH4 + 2H2O <- CO2 + 4H2} */
+		{
+			R2 = (k2 / pow((PH2), 3.5)*((PCH4)*pow((PH2O), 2.0) - pow((PH2), 4.0)*(PCO2) / Keq_3)) / pow((DEN), 2.0);
+			*rate = R2 * 2142. / 3600.;
+		}
+
+		else if (!strcmp(r->name,"reaction-5"))	/* Reaction-3 {CO + H2O -> CO2 + H2} */
+	{	R3=k3/(PH2)*((PCO)*(PH2O)-(PH2)*(PCO2)/Keq_2)/pow((DEN),2.0);
+		*rate=R3*2142./3600.;}
+
+		else if (!strcmp(r->name, "reaction-6"))	/* Reaction-3 {CO + H2O <- CO2 + H2} */
+		{
+			R3 = k3 / (PH2)*((PCO)*(PH2O)-(PH2)*(PCO2) / Keq_2) / pow((DEN), 2.0);
+			*rate = R3 * 2142. / 3600.;
+		}
+
+		else
+	{	*rate=0.; }
+
+
+	*rate=*rate;
+	*rr_t=*rate;
+}
